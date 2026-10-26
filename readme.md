@@ -268,72 +268,6 @@ Alternatively, host the contents of `WebGLBuild` using a local HTTP server or co
 
 
 
-\## Repository Structure
-
-
-
-```text
-
-SlotMachineGame/
-
-├── Assets/
-
-│   ├── Scripts/
-
-│   ├── Scenes/
-
-│   └── ... other game assets
-
-├── Packages/
-
-├── ProjectSettings/
-
-├── WebGLBuild/
-
-│   ├── Build/
-
-│   ├── TemplateData/
-
-│   └── index.html
-
-├── .gitignore
-
-└── README.md
-
-```
-
-
-
-\## Testing
-
-
-
-The game has been tested for:
-
-
-
-\- Spin initiation and prevention of overlapping spins
-
-\- Random symbol outcomes
-
-\- Center-row symbol alignment
-
-\- Betting and credit deductions
-
-\- Winning combinations and payouts
-
-\- Insufficient-credit handling
-
-\- Reel animations and landing effects
-
-\- WIN text object pooling
-
-\- Audio playback
-
-\- Browser gameplay
-
-
-
 \## Development Notes
 
 
@@ -343,18 +277,6 @@ This project was developed as a Unity slot machine assignment, with an emphasis 
 
 
 The project source and Web build are included in this repository.
-
-
-
-\## Developer
-
-
-
-\*\*Mohamed Salih\*\*
-
-
-
-GitHub: \[Salih-mohd](https://github.com/Salih-mohd)
 
 
 
