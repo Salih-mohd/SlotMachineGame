@@ -268,15 +268,23 @@ Alternatively, host the contents of `WebGLBuild` using a local HTTP server or co
 
 
 
-\## Development Notes
+## Thought Process & Development Approach
 
+My approach was to first build a functional slot machine gameplay loop, then progressively improve its visuals, animations, and user experience.
 
+1. **Modular Architecture:** Separated reel movement, random outcome generation, win evaluation, payout calculation, and wallet management into independent components to keep the code maintainable.
 
-This project was developed as a Unity slot machine assignment, with an emphasis on maintainable code, reusable systems, and a polished gameplay experience.
+2. **Data-Driven Symbols:** Used ScriptableObjects to store symbol information and payout multipliers, making the system easier to configure and extend.
 
+3. **Outcome-First Design:** Generated the spin outcome before starting the reel animations. This allowed the reels to visually stop at predetermined symbols while keeping the gameplay logic separate from animations.
 
+4. **Performance Optimization:** Reused reel symbols during spinning and implemented object pooling for WIN text effects to minimize unnecessary object creation and destruction.
 
-The project source and Web build are included in this repository.
+5. **Animation & User Experience:** Added smooth acceleration, controlled deceleration, staggered stopping, landing bounce, credit animations, and audio feedback to improve the overall feel of the game.
+
+6. **Testing & Deployment:** Tested betting, winning combinations, payouts, and UI interactions before building and verifying the game for the Web platform.
+
+**Key Design Decision:** I prioritized completing a stable core gameplay experience before implementing additional features, while keeping the architecture flexible enough for future improvements such as bonus symbols and multiple paylines.
 
 
 
