@@ -18,11 +18,28 @@ public class ReelController : MonoBehaviour
     [SerializeField] private float symbolSpacing = 0f;
 
     [Header("Spin Settings")]
-    [SerializeField] private float spinSpeed = 600f;
+    [SerializeField, Min(1f)]
+    private float spinSpeed = 600f;
+
+    [SerializeField, Min(0f)]
+    private float accelerationDuration = 0.35f;
 
     [Header("Stop Settings")]
-    [SerializeField] private float stopDuration = 2f;
-    [SerializeField] private int extraCycles = 1;
+    [SerializeField, Min(0.1f)]
+    private float stopDuration = 1.5f;
+
+    [SerializeField, Min(0)]
+    private int extraCycles = 1;
+
+    [Header("Landing Bounce")]
+    [SerializeField]
+    private bool enableLandingBounce = true;
+
+    [SerializeField, Min(0f)]
+    private float bounceDistance = 12f;
+
+    [SerializeField, Min(0.01f)]
+    private float bounceDuration = 0.2f;
 
     [Header("Testing Only")]
     [SerializeField] private bool autoTest = false;
@@ -30,8 +47,14 @@ public class ReelController : MonoBehaviour
     private readonly List<RectTransform> symbolRects = new();
 
     private SymbolData targetSymbol;
+
     private bool isSpinning;
     private bool isStopping;
+
+    private float spinStartTime;
+
+    // Store the strip's resting position.
+    private Vector2 originalStripPosition;
 
     public event Action<ReelController> OnReelStopped;
 
@@ -43,12 +66,16 @@ public class ReelController : MonoBehaviour
 
     private void Start()
     {
+        if (symbolStrip != null)
+        {
+            originalStripPosition = symbolStrip.anchoredPosition;
+        }
+
         GenerateSymbols();
 
-        // Temporary test. Remove when SlotMachineController is ready.
         if (autoTest && availableSymbols.Length > 1)
         {
-            SetTargetSymbol(availableSymbols[1]); // Cherry
+            SetTargetSymbol(availableSymbols[1]);
             StartSpin();
             Invoke(nameof(StopSpin), 2f);
         }
@@ -56,12 +83,48 @@ public class ReelController : MonoBehaviour
 
     private void Update()
     {
-        // Normal constant-speed spinning.
-        // LeanTween takes control during stopping.
+        // Normal spinning with smooth acceleration.
+        // LeanTween takes control when stopping starts.
         if (isSpinning && !isStopping)
         {
-            MoveSymbols(spinSpeed * Time.deltaTime);
+            float currentSpeed = GetCurrentSpinSpeed();
+
+            MoveSymbols(currentSpeed * Time.deltaTime);
         }
+    }
+
+    // Configure shared acceleration and deceleration timing.
+    public void ConfigureMotion(
+        float acceleration,
+        float deceleration)
+    {
+        accelerationDuration = Mathf.Max(0f, acceleration);
+        stopDuration = Mathf.Max(0.1f, deceleration);
+    }
+
+    // Configure shared landing bounce settings.
+    public void ConfigureBounce(
+        bool enabled,
+        float distance,
+        float duration)
+    {
+        enableLandingBounce = enabled;
+        bounceDistance = Mathf.Max(0f, distance);
+        bounceDuration = Mathf.Max(0.01f, duration);
+    }
+
+    private float GetCurrentSpinSpeed()
+    {
+        if (accelerationDuration <= 0f)
+            return spinSpeed;
+
+        float progress = Mathf.Clamp01(
+            (Time.time - spinStartTime) / accelerationDuration
+        );
+
+        float easedProgress = progress * progress * progress;
+
+        return spinSpeed * easedProgress;
     }
 
     private void GenerateSymbols()
@@ -98,9 +161,14 @@ public class ReelController : MonoBehaviour
             rect.anchorMax = new Vector2(0.5f, 1f);
             rect.pivot = new Vector2(0.5f, 0.5f);
 
-            rect.sizeDelta = new Vector2(symbolHeight, symbolHeight);
+            rect.sizeDelta = new Vector2(
+                symbolHeight,
+                symbolHeight
+            );
 
-            float y = -(i * SymbolStep + symbolHeight * 0.5f);
+            float y = -(
+                i * SymbolStep + symbolHeight * 0.5f
+            );
 
             rect.anchoredPosition = new Vector2(0f, y);
 
@@ -111,7 +179,9 @@ public class ReelController : MonoBehaviour
             symbolRects.Count * SymbolStep - symbolSpacing;
 
         symbolStrip.SetSizeWithCurrentAnchors(
-            RectTransform.Axis.Vertical, totalHeight);
+            RectTransform.Axis.Vertical,
+            totalHeight
+        );
     }
 
     // Move symbols downward and recycle them.
@@ -121,7 +191,10 @@ public class ReelController : MonoBehaviour
             return;
 
         float loopHeight = LoopHeight;
-        float bottomLimit = -loopHeight - symbolHeight * 0.5f;
+
+        float bottomLimit =
+       -(symbolRects.Count - 1) * SymbolStep
+       - symbolHeight * 0.5f;
 
         foreach (RectTransform rect in symbolRects)
         {
@@ -129,7 +202,6 @@ public class ReelController : MonoBehaviour
 
             position.y -= distance;
 
-            // Handle even large movement distances safely.
             while (position.y < bottomLimit)
             {
                 position.y += loopHeight;
@@ -144,26 +216,37 @@ public class ReelController : MonoBehaviour
         if (isSpinning || symbolRects.Count == 0)
             return;
 
+        // Make sure the strip starts at its resting position.
+        symbolStrip.anchoredPosition = originalStripPosition;
+
         isSpinning = true;
         isStopping = false;
+
+        spinStartTime = Time.time;
     }
 
-    // Starts smooth deceleration toward the target symbol.
     public void StopSpin()
     {
         if (!isSpinning || isStopping || targetSymbol == null)
             return;
 
-        int targetIndex = Array.IndexOf(availableSymbols, targetSymbol);
+        int targetIndex = Array.IndexOf(
+            availableSymbols,
+            targetSymbol
+        );
 
         if (targetIndex < 0)
             return;
 
+        // Capture current speed to avoid a sudden jump.
+        float startingSpeed = Mathf.Max(
+            GetCurrentSpinSpeed(),
+            1f
+        );
+
         isStopping = true;
 
         RectTransform targetRect = symbolRects[targetIndex];
-
-        // Find the symbol's actual visual center in reel space.
         RectTransform reelRect = (RectTransform)transform;
 
         Vector3 symbolWorldCenter =
@@ -172,24 +255,70 @@ public class ReelController : MonoBehaviour
         float currentY =
             reelRect.InverseTransformPoint(symbolWorldCenter).y;
 
-        // Target is the center of the visible reel window.
         float desiredY = reelRect.rect.center.y;
 
-        // Find forward downward travel needed for alignment.
-        float alignmentDistance =
-            Mathf.Repeat(currentY - desiredY, LoopHeight);
+        float alignmentDistance = Mathf.Repeat(
+            currentY - desiredY,
+            LoopHeight
+        );
 
-        // Travel extra full cycles before landing.
+        float brakingDistance =
+            startingSpeed * stopDuration * 0.5f;
+
         float totalDistance =
             extraCycles * LoopHeight + alignmentDistance;
 
+        // Add full cycles until we have enough stopping distance.
+        while (totalDistance < brakingDistance)
+        {
+            totalDistance += LoopHeight;
+        }
+
+        float cruiseDistance =
+            totalDistance - brakingDistance;
+
+        float cruiseDuration =
+            cruiseDistance / startingSpeed;
+
+        float totalDuration =
+            cruiseDuration + stopDuration;
+
         float previousDistance = 0f;
 
-        LeanTween.value(gameObject, 0f, totalDistance, stopDuration)
-            .setEase(LeanTweenType.easeOutCubic)
-            .setOnUpdate((float traveledDistance) =>
+        LeanTween.value(gameObject, 0f, 1f, totalDuration)
+            .setEase(LeanTweenType.linear)
+            .setOnUpdate((float progress) =>
             {
-                float delta = traveledDistance - previousDistance;
+                float elapsed = progress * totalDuration;
+
+                float traveledDistance;
+
+                if (elapsed <= cruiseDuration)
+                {
+                    // Continue at the current speed.
+                    traveledDistance = startingSpeed * elapsed;
+                }
+                else
+                {
+                    // Gradually reduce speed to zero.
+                    float brakeTime = Mathf.Clamp(
+                        elapsed - cruiseDuration,
+                        0f,
+                        stopDuration
+                    );
+
+                    float brakingTravel =
+                        startingSpeed * brakeTime
+                        - 0.5f
+                        * (startingSpeed / stopDuration)
+                        * brakeTime * brakeTime;
+
+                    traveledDistance =
+                        cruiseDistance + brakingTravel;
+                }
+
+                float delta =
+                    traveledDistance - previousDistance;
 
                 MoveSymbols(delta);
 
@@ -197,13 +326,59 @@ public class ReelController : MonoBehaviour
             })
             .setOnComplete(() =>
             {
-                isSpinning = false;
-                isStopping = false;
+                MoveSymbols(totalDistance - previousDistance);
 
-                Debug.Log($"{name} stopped at {targetSymbol.SymbolId}");
-
-                OnReelStopped?.Invoke(this);
+                // Play landing bounce before reporting the reel stopped.
+                PlayLandingBounce();
             });
+    }
+
+    private void PlayLandingBounce()
+    {
+        if (!enableLandingBounce || bounceDistance <= 0f)
+        {
+            CompleteStop();
+            return;
+        }
+
+        Vector2 restingPosition = originalStripPosition;
+
+        // Briefly move the strip downward.
+        Vector2 dipPosition = restingPosition +
+            Vector2.down * bounceDistance;
+
+        float dipDuration = bounceDuration * 0.4f;
+        float returnDuration = bounceDuration * 0.6f;
+
+        LeanTween.move(symbolStrip, dipPosition, dipDuration)
+            .setEase(LeanTweenType.easeOutQuad)
+            .setOnComplete(() =>
+            {
+                // Return to the exact original position.
+                LeanTween.move(
+                    symbolStrip,
+                    restingPosition,
+                    returnDuration
+                )
+                .setEase(LeanTweenType.easeOutCubic)
+                .setOnComplete(() =>
+                {
+                    symbolStrip.anchoredPosition = restingPosition;
+
+                    CompleteStop();
+                });
+            });
+    }
+
+    private void CompleteStop()
+    {
+        isSpinning = false;
+        isStopping = false;
+
+        Debug.Log($"{name} stopped at {targetSymbol.SymbolId}");
+
+        // Result evaluation happens only after the bounce.
+        OnReelStopped?.Invoke(this);
     }
 
     public void SetTargetSymbol(SymbolData symbol)

@@ -16,20 +16,44 @@ public class SlotMachineController : MonoBehaviour
     [SerializeField] private WalletManager walletManager;
     [SerializeField] private BetSelectionUI betSelectionUI;
 
+    [Header("Audio")]
+    [SerializeField] private SlotAudioController slotAudioController;
+
     [Header("UI References")]
     [SerializeField] private Button spinButton;
 
     [Header("Spin Timing")]
-    [SerializeField] private float initialSpinDuration = 2f;
-    [SerializeField] private float reelStopDelay = 0.5f;
+    [SerializeField, Min(0f)]
+    private float initialSpinDuration = 2f;
+
+    [SerializeField, Min(0f)]
+    private float reelStopDelay = 0.5f;
+
+    [Header("Visual Effects")]
+    [SerializeField] private SlotEffectsController slotEffectsController;
+
+    [Header("Shared Reel Animation Timing")]
+    [SerializeField, Min(0f)]
+    private float accelerationDuration = 0.35f;
+
+    [SerializeField, Min(0.1f)]
+    private float decelerationDuration = 1.5f;
+
+    [Header("Shared Reel Landing Bounce")]
+    [SerializeField] private bool enableLandingBounce = true;
+
+    [SerializeField, Min(0f)]
+    private float bounceDistance = 12f;
+
+    [SerializeField, Min(0.01f)]
+    private float bounceDuration = 0.2f;
 
     private bool isSpinInProgress;
     private int stoppedReelCount;
 
     private SymbolData[] currentOutcome;
 
-    // Store the bet used for the current spin.
-    // Prevents changes from affecting payout calculations.
+    // Lock the bet amount for the current spin.
     private int currentSpinBet;
 
     public bool IsSpinInProgress => isSpinInProgress;
@@ -39,6 +63,7 @@ public class SlotMachineController : MonoBehaviour
 
     private void OnEnable()
     {
+        // Listen for individual reel stop events.
         if (reels != null)
         {
             foreach (ReelController reel in reels)
@@ -48,8 +73,11 @@ public class SlotMachineController : MonoBehaviour
             }
         }
 
+        // Update SPIN button when credits change.
         if (walletManager != null)
+        {
             walletManager.OnBalanceChanged += HandleBalanceChanged;
+        }
     }
 
     private void Start()
@@ -69,7 +97,13 @@ public class SlotMachineController : MonoBehaviour
         }
 
         if (walletManager != null)
+        {
             walletManager.OnBalanceChanged -= HandleBalanceChanged;
+        }
+
+        // Prevent a looping reel sound from continuing
+        // if the controller is disabled.
+        slotAudioController?.StopReelLoop();
     }
 
     // Called by the SPIN button.
@@ -80,7 +114,7 @@ public class SlotMachineController : MonoBehaviour
 
         int selectedBet = betSelectionUI.SelectedBet;
 
-        // Prevent spinning without sufficient credits.
+        // Reject the spin if credits are insufficient.
         if (!walletManager.CanAffordBet(selectedBet))
         {
             Debug.LogWarning("Not enough credits to spin.");
@@ -97,12 +131,13 @@ public class SlotMachineController : MonoBehaviour
         stoppedReelCount = 0;
         currentSpinBet = betAmount;
 
-        // Disable spinning and notify UI systems.
         RefreshSpinButton();
         OnSpinStarted?.Invoke();
 
-        // Generate the result before reel animation.
-        currentOutcome = outcomeGenerator.GenerateOutcome(reels.Length);
+        // Generate the outcome before spinning.
+        currentOutcome = outcomeGenerator.GenerateOutcome(
+            reels.Length
+        );
 
         if (currentOutcome == null ||
             currentOutcome.Length != reels.Length)
@@ -116,49 +151,82 @@ public class SlotMachineController : MonoBehaviour
         {
             if (currentOutcome[i] == null)
             {
-                Debug.LogError("Generated outcome contains a null symbol.");
+                Debug.LogError(
+                    "Generated outcome contains a null symbol."
+                );
+
                 FinishSpin();
                 yield break;
             }
         }
 
-        // Deduct credits only after generating a valid outcome.
+        // Deduct credits only after obtaining a valid outcome.
         if (!walletManager.TryPlaceBet(currentSpinBet))
         {
             FinishSpin();
             yield break;
         }
 
-        // Assign the results and start all three reels.
+        // Configure all reels once before they start.
+        foreach (ReelController reel in reels)
+        {
+            reel.ConfigureMotion(
+                accelerationDuration,
+                decelerationDuration
+            );
+
+            reel.ConfigureBounce(
+                enableLandingBounce,
+                bounceDistance,
+                bounceDuration
+            );
+        }
+
+        // Assign outcomes and start all three reels.
         for (int i = 0; i < reels.Length; i++)
         {
             reels[i].SetTargetSymbol(currentOutcome[i]);
             reels[i].StartSpin();
         }
 
-        // Convert the generated symbols into a readable string.
-        string outcomeText = string.Join(", ",
-            Array.ConvertAll(currentOutcome, symbol => symbol.SymbolId));
+        // AUDIO: Play spin-start and begin looping reel sound.
+        slotAudioController?.PlaySpinStart();
+        slotAudioController?.StartReelLoop();
 
-        // Log the selected bet and generated outcome.
-        Debug.Log($"Bet: {currentSpinBet}G | Outcome: {outcomeText}");
+        string outcomeText = string.Join(
+            ", ",
+            Array.ConvertAll(
+                currentOutcome,
+                symbol => symbol.SymbolId
+            )
+        );
 
-        // Keep all reels spinning initially.
+        Debug.Log(
+            $"Bet: {currentSpinBet}G | Outcome: {outcomeText}"
+        );
+
+        // Let all three reels spin initially.
         yield return new WaitForSeconds(initialSpinDuration);
 
-        // Stop the reels sequentially.
+        // Request reel stops sequentially.
         for (int i = 0; i < reels.Length; i++)
         {
             reels[i].StopSpin();
 
             if (i < reels.Length - 1)
+            {
                 yield return new WaitForSeconds(reelStopDelay);
+            }
         }
 
-        // Wait for all reels to stop.
+        // Wait until all reels have finished stopping
+        // and completed their landing bounce.
         yield return new WaitUntil(
             () => stoppedReelCount == reels.Length
         );
+
+        // AUDIO: All reels have finished.
+        slotAudioController?.StopReelLoop();
 
         // Evaluate the center-row combination.
         EvaluateSpinResult();
@@ -186,7 +254,14 @@ public class SlotMachineController : MonoBehaviour
 
         if (payout > 0)
         {
+            // Award credits and trigger existing UI animation.
             walletManager.AddReward(payout);
+
+            // Play the existing flying WIN text effects.
+            slotEffectsController?.PlayWinEffect();
+
+            // AUDIO: Play winning sound.
+            slotAudioController?.PlayWin();
 
             Debug.Log(
                 $"WIN! {winningSymbol.SymbolId} x3 | " +
@@ -197,6 +272,9 @@ public class SlotMachineController : MonoBehaviour
 
     private void FinishSpin()
     {
+        // Safety: stop reel audio even if the spin ends early.
+        slotAudioController?.StopReelLoop();
+
         isSpinInProgress = false;
 
         RefreshSpinButton();
@@ -209,6 +287,9 @@ public class SlotMachineController : MonoBehaviour
     private void HandleReelStopped(ReelController reel)
     {
         stoppedReelCount++;
+
+        // AUDIO: Each reel plays a sound after its landing bounce.
+        slotAudioController?.PlayReelStop();
     }
 
     private void HandleBalanceChanged(int newBalance)
@@ -216,7 +297,7 @@ public class SlotMachineController : MonoBehaviour
         RefreshSpinButton();
     }
 
-    // Called when the player selects a different bet.
+    // Called when the player selects another bet.
     public void HandleBetChanged(int newBet)
     {
         RefreshSpinButton();
@@ -224,18 +305,24 @@ public class SlotMachineController : MonoBehaviour
 
     private void RefreshSpinButton()
     {
-        if (spinButton == null || walletManager == null ||
+        if (spinButton == null ||
+            walletManager == null ||
             betSelectionUI == null)
+        {
             return;
+        }
 
         spinButton.interactable =
             !isSpinInProgress &&
-            walletManager.CanAffordBet(betSelectionUI.SelectedBet);
+            walletManager.CanAffordBet(
+                betSelectionUI.SelectedBet
+            );
     }
 
     private bool ValidateSetup()
     {
-        if (reels == null || reels.Length != 3 ||
+        if (reels == null ||
+            reels.Length != 3 ||
             outcomeGenerator == null ||
             winEvaluator == null ||
             payoutCalculator == null ||
@@ -243,7 +330,10 @@ public class SlotMachineController : MonoBehaviour
             betSelectionUI == null ||
             spinButton == null)
         {
-            Debug.LogError("Slot machine references are incomplete.");
+            Debug.LogError(
+                "Slot machine references are incomplete."
+            );
+
             return false;
         }
 

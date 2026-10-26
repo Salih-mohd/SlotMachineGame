@@ -161,7 +161,10 @@ public class SlotGameUI : MonoBehaviour
             shakeTweenId = -1;
         }
 
-        creditPanel.localRotation = originalPanelRotation;
+        if (creditPanel != null)
+        {
+            creditPanel.localRotation = originalPanelRotation;
+        }
     }
 
     private void UpdateCreditText(int amount)
@@ -180,5 +183,17 @@ public class SlotGameUI : MonoBehaviour
 
         // Stop shaking and restore rotation.
         StopShake();
+    }
+
+    private void OnDestroy()
+    {
+        // Stop any animations associated with the credit panel.
+        if (creditPanel != null)
+        {
+            LeanTween.cancel(creditPanel.gameObject);
+        }
+
+        // Stop tweens running on this controller.
+        LeanTween.cancel(gameObject);
     }
 }
